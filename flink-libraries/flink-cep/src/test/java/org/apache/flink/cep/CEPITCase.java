@@ -38,6 +38,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import javax.annotation.Nullable;
 import java.util.Map;
 
 @SuppressWarnings("serial")
@@ -422,4 +423,45 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 
 		env.execute();
 	}
+
+	@Test
+	public void testProcessingTimeWithWindowTimeout() throws Exception {
+		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+		env.setParallelism(1);
+
+		DataStream<Integer> input = env
+			.fromElements(1, 2, 4, 5)
+			.assignTimestampsAndWatermarks(new AssignerWithPunctuatedWatermarks<Integer>() {
+				@Nullable
+				@Override
+				public Watermark checkAndGetNextWatermark(Integer lastElement, long extractedTimestamp) {
+					return new Watermark(extractedTimestamp-3000);
+				}
+
+				@Override
+				public long extractTimestamp(Integer element, long previousElementTimestamp) {
+					return element.longValue()*1000;
+				}
+			});
+
+		Pattern<Integer, ?> pattern = Pattern.<Integer>begin("start").next("end").withinTimeoutTrigger(Time.seconds(2));
+
+		DataStream<String> result = CEP.pattern(input, pattern).select(new PatternSelectFunction<Integer, String>() {
+			@Override
+			public String select(Map<String, Integer> pattern) throws Exception {
+				return pattern.get("start").toString() +
+					(pattern.containsKey("end") ? pattern.get("end").toString() : new String("to"));
+			}
+		});
+
+		result.print();
+		result.writeAsText(resultPath, FileSystem.WriteMode.OVERWRITE);
+
+		expected = "12\n2to\n45";
+
+		env.execute();
+	}
+
+
 }

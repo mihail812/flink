@@ -36,10 +36,13 @@ import org.apache.flink.streaming.runtime.tasks.StreamTaskState;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.HashSet;
-import java.util.Objects;
-import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.Collection;
+import java.util.Objects;
+
 
 /**
  * CEP pattern operator implementation for a keyed input stream. For each key, the operator creates
@@ -147,6 +150,21 @@ public class KeyedCEPPatternOperator<IN, KEY> extends AbstractCEPPatternOperator
 		super.processElement(element);
 	}
 
+	protected void processTimeoutedEvents(NFA<IN> nfa, long timestamp) {
+		Collection<Map<String, IN>> patterns = nfa.processTimeouted(timestamp);
+
+		if (!patterns.isEmpty()) {
+			StreamRecord<Map<String, IN>> streamRecord = new StreamRecord<Map<String, IN>>(
+				null,
+				timestamp);
+
+			for (Map<String, IN> pattern : patterns) {
+				streamRecord.replace(pattern);
+				output.collect(streamRecord);
+			}
+		}
+	}
+
 	@Override
 	public void processWatermark(Watermark mark) throws Exception {
 		// iterate over all keys to trigger the execution of the buffered elements
@@ -162,7 +180,9 @@ public class KeyedCEPPatternOperator<IN, KEY> extends AbstractCEPPatternOperator
 
 				processEvent(nfa, streamRecord.getValue(), streamRecord.getTimestamp());
 			}
+			processTimeoutedEvents(nfa, mark.getTimestamp());
 		}
+
 
 		output.emitWatermark(mark);
 	}

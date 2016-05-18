@@ -70,11 +70,12 @@ public class NFACompiler {
 	public static <T> NFAFactory<T> compileFactory(Pattern<T, ?> pattern, TypeSerializer<T> inputTypeSerializer) {
 		if (pattern == null) {
 			// return a factory for empty NFAs
-			return new NFAFactoryImpl<T>(inputTypeSerializer, 0, Collections.<State<T>>emptyList());
+			return new NFAFactoryImpl<T>(inputTypeSerializer, 0, false, Collections.<State<T>>emptyList());
 		} else {
 			// set of all generated states
 			Map<String, State<T>> states = new HashMap<>();
 			long windowTime;
+			boolean triggerOnTimeout;
 
 			Pattern<T, ?> succeedingPattern;
 			State<T> succeedingState;
@@ -86,6 +87,7 @@ public class NFACompiler {
 			states.put(currentPattern.getName(), currentState);
 
 			windowTime = currentPattern.getWindowTime() != null ? currentPattern.getWindowTime().toMilliseconds() : 0L;
+			triggerOnTimeout = currentPattern.getTriggerOnTimeout();
 
 			while (currentPattern.getPrevious() != null) {
 				succeedingPattern = currentPattern;
@@ -137,10 +139,10 @@ public class NFACompiler {
 				(FilterFunction<T>) currentPattern.getFilterFunction()
 			));
 
-			NFA<T> nfa = new NFA<T>(inputTypeSerializer, windowTime);
+			NFA<T> nfa = new NFA<T>(inputTypeSerializer, windowTime, triggerOnTimeout);
 			nfa.addStates(states.values());
 
-			return new NFAFactoryImpl<T>(inputTypeSerializer, windowTime, new HashSet<>(states.values()));
+			return new NFAFactoryImpl<T>(inputTypeSerializer, windowTime, triggerOnTimeout, new HashSet<>(states.values()));
 		}
 	}
 
@@ -167,17 +169,19 @@ public class NFACompiler {
 
 		private final TypeSerializer<T> inputTypeSerializer;
 		private final long windowTime;
+		private final boolean triggerOnTimeout;
 		private final Collection<State<T>> states;
 
-		private NFAFactoryImpl(TypeSerializer<T> inputTypeSerializer, long windowTime, Collection<State<T>> states) {
+		private NFAFactoryImpl(TypeSerializer<T> inputTypeSerializer, long windowTime,  boolean triggerOnTimeout, Collection<State<T>> states) {
 			this.inputTypeSerializer = inputTypeSerializer;
 			this.windowTime = windowTime;
+			this.triggerOnTimeout = triggerOnTimeout;
 			this.states = states;
 		}
 
 		@Override
 		public NFA<T> createNFA() {
-			NFA<T> result =  new NFA<>(inputTypeSerializer.duplicate(), windowTime);
+			NFA<T> result =  new NFA<>(inputTypeSerializer.duplicate(), windowTime, triggerOnTimeout);
 
 			result.addStates(states);
 

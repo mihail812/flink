@@ -70,6 +70,7 @@ public class NFA<T> implements Serializable {
 
 	// Length of the window
 	private final long windowTime;
+	private final boolean triggerOnTimeout;
 
 	// Current starting index for the next dewey version number
 	private int startEventCounter;
@@ -77,9 +78,10 @@ public class NFA<T> implements Serializable {
 	// Current set of computation states within the state machine
 	private transient Queue<ComputationState<T>> computationStates;
 
-	public NFA(final TypeSerializer<T> eventSerializer, final long windowTime) {
+	public NFA(final TypeSerializer<T> eventSerializer, final long windowTime, final boolean triggerOnTimeout) {
 		this.nonDuplicatingTypeSerializer = new NonDuplicatingTypeSerializer<>(eventSerializer);
 		this.windowTime = windowTime;
+		this.triggerOnTimeout = triggerOnTimeout;
 		sharedBuffer = new SharedBuffer<>(nonDuplicatingTypeSerializer);
 		computationStates = new LinkedList<>();
 
@@ -104,6 +106,57 @@ public class NFA<T> implements Serializable {
 			computationStates.add(new ComputationState<>(state, null, -1L, null, -1L));
 		}
 	}
+	/**
+	 * Processes the timeouted events next input event. If some of the computations reach a final state then the
+	 * resulting event sequences are returned.
+	 *
+	 * @param timestamp The timestamp of the current event
+	 * @return The collection of matched patterns (e.g. the result of computations which have
+	 * reached a final state)
+	 */
+	public Collection<Map<String, T>> processTimeouted(final long timestamp) {
+		final int numberComputationStates = computationStates.size();
+		final List<Map<String, T>> result = new ArrayList<>();
+
+		if (!triggerOnTimeout) {
+			return result;
+		}
+
+		// iterate over all current computations
+		for (int i = 0; i < numberComputationStates; i++) {
+			ComputationState<T> computationState = computationStates.poll();
+
+			final Collection<ComputationState<T>> newComputationStates;
+
+			if (!computationState.isStartState() &&
+				windowTime > 0 &&
+				timestamp - computationState.getStartTimestamp() >= windowTime
+				) {
+				result.addAll(extractPatternMatches(computationState));
+
+				// remove computation state which has exceeded the window length
+				sharedBuffer.release(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
+				sharedBuffer.remove(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
+			}
+
+			// prune shared buffer based on window length
+			if(windowTime > 0) {
+				long pruningTimestamp = timestamp - windowTime;
+
+				// sanity check to guard against underflows
+				if (pruningTimestamp >= timestamp) {
+					throw new IllegalStateException("Detected an underflow in the pruning timestamp. This indicates that" +
+						" either the window length is too long (" + windowTime + ") or that the timestamp has not been" +
+						" set correctly (e.g. Long.MIN_VALUE).");
+				}
+
+				// remove all elements which are expired with respect to the window length
+				sharedBuffer.prune(pruningTimestamp);
+			}
+		}
+
+		return result;
+	}
 
 	/**
 	 * Processes the next input event. If some of the computations reach a final state then the
@@ -126,7 +179,13 @@ public class NFA<T> implements Serializable {
 
 			if (!computationState.isStartState() &&
 				windowTime > 0 &&
-				timestamp - computationState.getStartTimestamp() >= windowTime) {
+				timestamp - computationState.getStartTimestamp() >= windowTime
+				) {
+
+				if (triggerOnTimeout) {
+					result.addAll(extractPatternMatches(computationState));
+				}
+
 				// remove computation state which has exceeded the window length
 				sharedBuffer.release(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
 				sharedBuffer.remove(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
@@ -188,7 +247,7 @@ public class NFA<T> implements Serializable {
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(nonDuplicatingTypeSerializer, sharedBuffer, states, windowTime, startEventCounter);
+		return Objects.hash(nonDuplicatingTypeSerializer, sharedBuffer, states, windowTime, triggerOnTimeout, startEventCounter);
 	}
 
 	/**
