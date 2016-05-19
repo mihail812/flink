@@ -23,6 +23,7 @@ import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks;
 import org.apache.flink.streaming.api.functions.AssignerWithPunctuatedWatermarks;
 import org.apache.flink.streaming.api.functions.source.SourceFunction.SourceContext;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.connectors.kafka.internals.AbstractFetcher;
 import org.apache.flink.streaming.connectors.kafka.internals.ExceptionProxy;
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition;
@@ -226,6 +227,7 @@ public class Kafka09Fetcher<T> extends AbstractFetcher<T, TopicPartition> implem
 					}
 				}
 
+				long sleep = 0;
 				// get the records for each topic partition
 				for (KafkaTopicPartitionState<TopicPartition> partition : subscribedPartitions()) {
 					
@@ -244,8 +246,11 @@ public class Kafka09Fetcher<T> extends AbstractFetcher<T, TopicPartition> implem
 
 						// emit the actual record. this also update offset state atomically
 						// and deals with timestamps and watermark generation
-						emitRecord(value, partition, record.offset());
+						sleep = Math.max(emitRecord(value, partition, record.offset()), sleep);
 					}
+				}
+				if (sleep > 0) {
+					Thread.sleep(sleep);
 				}
 			}
 			// end main fetch loop

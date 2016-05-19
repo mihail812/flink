@@ -52,7 +52,7 @@ public final class KafkaTopicPartitionStateWithPeriodicWatermarks<T, KPH> extend
 	public long getTimestampForRecord (T record) {
 		return timestampsAndWatermarks.extractTimestamp(record, Long.MIN_VALUE);
 	}
-	
+
 	public long getCurrentWatermarkTimestamp() {
 		Watermark wm = timestampsAndWatermarks.getCurrentWatermark();
 		if (wm != null) {

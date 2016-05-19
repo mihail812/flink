@@ -49,7 +49,15 @@ public abstract class AbstractFetcher<T, KPH> {
 	private static final int NO_TIMESTAMPS_WATERMARKS = 0;
 	private static final int PERIODIC_WATERMARKS = 1;
 	private static final int PUNCTUATED_WATERMARKS = 2;
-	
+
+	private static long lastMinEmited = 0;
+	private static long lastMaxEmited = Long.MAX_VALUE;
+
+	synchronized static long setEmited(long candidate) {
+		lastMinEmited = Math.min(lastMinEmited, candidate);
+		lastMaxEmited = Math.max(lastMinEmited, candidate);
+		return (candidate-lastMinEmited)/100;
+	}
 	// ------------------------------------------------------------------------
 	
 	/** The source context to emit records and watermarks to */
@@ -209,7 +217,7 @@ public abstract class AbstractFetcher<T, KPH> {
 	 * @param partitionState The state of the Kafka partition from which the record was fetched
 	 * @param offset The offset from which the record was fetched
 	 */
-	protected final void emitRecord(T record, KafkaTopicPartitionState<KPH> partitionState, long offset) {
+	protected final long emitRecord(T record, KafkaTopicPartitionState<KPH> partitionState, long offset) {
 		if (timestampWatermarkMode == NO_TIMESTAMPS_WATERMARKS) {
 			// fast path logic, in case there are no watermarks
 
@@ -219,12 +227,13 @@ public abstract class AbstractFetcher<T, KPH> {
 				sourceContext.collect(record);
 				partitionState.setOffset(offset);
 			}
+			return 0;
 		}
 		else if (timestampWatermarkMode == PERIODIC_WATERMARKS) {
-			emitRecordWithTimestampAndPeriodicWatermark(record, partitionState, offset);
+			return emitRecordWithTimestampAndPeriodicWatermark(record, partitionState, offset);
 		}
 		else {
-			emitRecordWithTimestampAndPunctuatedWatermark(record, partitionState, offset);
+			return emitRecordWithTimestampAndPunctuatedWatermark(record, partitionState, offset);
 		}
 	}
 
@@ -232,7 +241,7 @@ public abstract class AbstractFetcher<T, KPH> {
 	 * Record emission, if a timestamp will be attached from an assigner that is
 	 * also a periodic watermark generator.
 	 */
-	private void emitRecordWithTimestampAndPeriodicWatermark(
+	private long emitRecordWithTimestampAndPeriodicWatermark(
 			T record, KafkaTopicPartitionState<KPH> partitionState, long offset)
 	{
 		@SuppressWarnings("unchecked")
@@ -247,6 +256,8 @@ public abstract class AbstractFetcher<T, KPH> {
 		synchronized (withWatermarksState) {
 			timestamp = withWatermarksState.getTimestampForRecord(record);
 		}
+		long ourEmited = withWatermarksState.getCurrentWatermarkTimestamp();
+		long sleep = setEmited(ourEmited);
 
 		// emit the record with timestamp, using the usual checkpoint lock to guarantee
 		// atomicity of record emission and offset state update 
@@ -254,13 +265,14 @@ public abstract class AbstractFetcher<T, KPH> {
 			sourceContext.collectWithTimestamp(record, timestamp);
 			partitionState.setOffset(offset);
 		}
+		return sleep;
 	}
 
 	/**
 	 * Record emission, if a timestamp will be attached from an assigner that is
 	 * also a punctuated watermark generator.
 	 */
-	private void emitRecordWithTimestampAndPunctuatedWatermark(
+	private long emitRecordWithTimestampAndPunctuatedWatermark(
 			T record, KafkaTopicPartitionState<KPH> partitionState, long offset)
 	{
 		@SuppressWarnings("unchecked")
@@ -271,7 +283,10 @@ public abstract class AbstractFetcher<T, KPH> {
 		// from the punctuated extractor
 		final long timestamp = withWatermarksState.getTimestampForRecord(record);
 		final Watermark newWatermark = withWatermarksState.checkAndGetNewWatermark(record, timestamp);
-			
+
+		long ourEmited = newWatermark.getTimestamp();
+		long sleep = setEmited(ourEmited);
+
 		// emit the record with timestamp, using the usual checkpoint lock to guarantee
 		// atomicity of record emission and offset state update 
 		synchronized (checkpointLock) {
@@ -284,6 +299,7 @@ public abstract class AbstractFetcher<T, KPH> {
 		if (newWatermark != null) {
 			updateMinPunctuatedWatermark(newWatermark);
 		}
+		return sleep;
 	}
 	/**
 	 *Checks whether a new per-partition watermark is also a new cross-partition watermark.
