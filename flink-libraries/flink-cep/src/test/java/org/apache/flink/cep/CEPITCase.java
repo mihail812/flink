@@ -23,6 +23,7 @@ import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.cep.pattern.Pattern;
+import org.apache.flink.contrib.streaming.state.RocksDBStateBackend;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -32,10 +33,7 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.util.StreamingMultipleProgramsTestBase;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.*;
 import org.junit.rules.TemporaryFolder;
 
 import javax.annotation.Nullable;
@@ -45,6 +43,7 @@ import java.util.Map;
 public class CEPITCase extends StreamingMultipleProgramsTestBase {
 
 	private String resultPath;
+	private String statePath;
 	private String expected;
 
 	@Rule
@@ -53,6 +52,7 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 	@Before
 	public void before() throws Exception {
 		resultPath = tempFolder.newFile().toURI().toString();
+		statePath= tempFolder.newFolder().toURI().toString();
 		expected = "";
 	}
 
@@ -455,7 +455,7 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 			}
 		});
 
-		result.print();
+//		result.print();
 		result.writeAsText(resultPath, FileSystem.WriteMode.OVERWRITE);
 
 		expected = "12\n2to\n45";
@@ -463,5 +463,138 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 		env.execute();
 	}
 
+	@Ignore
+	@Test
+	public void testSimpleKeyedPatternEventTimeRockDb() throws Exception {
+		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+		RocksDBStateBackend rockDbState = new RocksDBStateBackend(statePath);
+		env.setStateBackend(rockDbState);
+		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+		env.setParallelism(2);
+
+		// (Event, timestamp)
+		DataStream<Event> input = env.fromElements(
+			Tuple2.of(new Event(1, "start", 1.0), 5L),
+			Tuple2.of(new Event(1, "middle", 2.0), 1L),
+			Tuple2.of(new Event(2, "middle", 2.0), 4L),
+			Tuple2.of(new Event(2, "start", 2.0), 3L),
+			Tuple2.of(new Event(1, "end", 3.0), 3L),
+			Tuple2.of(new Event(3, "start", 4.1), 5L),
+			Tuple2.of(new Event(1, "end", 4.0), 10L),
+			Tuple2.of(new Event(2, "end", 2.0), 8L),
+			Tuple2.of(new Event(1, "middle", 5.0), 7L),
+			Tuple2.of(new Event(3, "middle", 6.0), 9L),
+			Tuple2.of(new Event(3, "end", 7.0), 7L)
+		).assignTimestampsAndWatermarks(new AssignerWithPunctuatedWatermarks<Tuple2<Event,Long>>() {
+
+			@Override
+			public long extractTimestamp(Tuple2<Event, Long> element, long currentTimestamp) {
+				return element.f1;
+			}
+
+			@Override
+			public Watermark checkAndGetNextWatermark(Tuple2<Event, Long> lastElement, long extractedTimestamp) {
+				return new Watermark(lastElement.f1 - 5);
+			}
+
+		}).map(new MapFunction<Tuple2<Event, Long>, Event>() {
+
+			@Override
+			public Event map(Tuple2<Event, Long> value) throws Exception {
+				return value.f0;
+			}
+		}).keyBy(new KeySelector<Event, Integer>() {
+
+			@Override
+			public Integer getKey(Event value) throws Exception {
+				return value.getId();
+			}
+		});
+
+		Pattern<Event, ?> pattern = Pattern.<Event>begin("start").where(new FilterFunction<Event>() {
+
+			@Override
+			public boolean filter(Event value) throws Exception {
+				return value.getName().equals("start");
+			}
+		}).followedBy("middle").where(new FilterFunction<Event>() {
+
+			@Override
+			public boolean filter(Event value) throws Exception {
+				return value.getName().equals("middle");
+			}
+		}).followedBy("end").where(new FilterFunction<Event>() {
+
+			@Override
+			public boolean filter(Event value) throws Exception {
+				return value.getName().equals("end");
+			}
+		});
+
+		DataStream<String> result = CEP.pattern(input, pattern).select(
+			new PatternSelectFunction<Event, String>() {
+
+				@Override
+				public String select(Map<String, Event> pattern) {
+					StringBuilder builder = new StringBuilder();
+
+					builder.append(pattern.get("start").getId()).append(",")
+						.append(pattern.get("middle").getId()).append(",")
+						.append(pattern.get("end").getId());
+
+					return builder.toString();
+				}
+			}
+		);
+
+		result.writeAsText(resultPath, FileSystem.WriteMode.OVERWRITE);
+
+		// the expected sequences of matching event ids
+		expected = "1,1,1\n2,2,2";
+
+		env.execute();
+	}
+
+	@Test
+	public void testProcessingTimeWithWindowRockDb() throws Exception {
+		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+		RocksDBStateBackend rockDbState = new RocksDBStateBackend(statePath);
+		env.setStateBackend(rockDbState);
+
+		env.setParallelism(1);
+
+		DataStream<Integer> input = env
+			.fromElements(1, 2, 4, 5)
+			.assignTimestampsAndWatermarks(new AssignerWithPunctuatedWatermarks<Integer>() {
+				@Nullable
+				@Override
+				public Watermark checkAndGetNextWatermark(Integer lastElement, long extractedTimestamp) {
+					return new Watermark(extractedTimestamp-3000);
+				}
+
+				@Override
+				public long extractTimestamp(Integer element, long previousElementTimestamp) {
+					return element.longValue()*1000;
+				}
+			});
+
+		Pattern<Integer, ?> pattern = Pattern.<Integer>begin("start").next("end").within(Time.seconds(20));
+
+		DataStream<String> result = CEP.pattern(input, pattern).select(new PatternSelectFunction<Integer, String>() {
+			@Override
+			public String select(Map<String, Integer> pattern) throws Exception {
+				return pattern.get("start").toString() +
+					(pattern.containsKey("end") ? pattern.get("end").toString() : new String("to"));
+			}
+		});
+
+		result.print();
+		result.writeAsText(resultPath, FileSystem.WriteMode.OVERWRITE);
+
+		expected = "12\n24\n45";
+
+		env.execute();
+	}
 
 }

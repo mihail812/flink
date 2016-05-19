@@ -132,7 +132,8 @@ public class KeyedCEPPatternOperator<IN, KEY> extends AbstractCEPPatternOperator
 
 	@Override
 	protected PriorityQueue<StreamRecord<IN>> getPriorityQueue() throws IOException {
-		PriorityQueue<StreamRecord<IN>> priorityQueue = priorityQueueOperatorState.value();
+		PriorityQueue<StreamRecord<IN>> priorityQueue =
+			priorityQueueOperatorState.value();
 
 		if (priorityQueue == null) {
 			priorityQueue = priorityQueueFactory.createPriorityQueue();
@@ -145,7 +146,9 @@ public class KeyedCEPPatternOperator<IN, KEY> extends AbstractCEPPatternOperator
 
 	@Override
 	public void processElement(StreamRecord<IN> element) throws Exception {
-		keys.add(keySelector.getKey(element.getValue()));
+		KEY key = keySelector.getKey(element.getValue());
+		setKeyContext(key);
+		keys.add(key);
 
 		super.processElement(element);
 	}
