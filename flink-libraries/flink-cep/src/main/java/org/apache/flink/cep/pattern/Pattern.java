@@ -52,7 +52,7 @@ public class Pattern<T, F extends T> {
 
 	// window length in which the pattern match has to occur
 	private Time windowTime;
-	private boolean triggerOnTimeout;
+	private boolean timeoutTrigger;
 
 	protected Pattern(final String name, final Pattern<T, ? extends T> previous) {
 		this.name = name;
@@ -74,7 +74,11 @@ public class Pattern<T, F extends T> {
 	public Time getWindowTime() {
 		return windowTime;
 	}
-	public boolean getTriggerOnTimeout() { return triggerOnTimeout; }
+	public boolean getTimeoutTrigger() {
+		return timeoutTrigger;
+	}
+
+
 
 	/**
 	 * Specifies a filter condition which has to be fulfilled by an event in order to be matched.
@@ -120,27 +124,25 @@ public class Pattern<T, F extends T> {
 	 * between first and the last event must not be longer than the window time.
 	 *
 	 * @param windowTime Time of the matching window
-	 *
 	 * @return The same pattenr operator with the new window length
 	 */
 	public Pattern<T, F> within(Time windowTime) {
 		if (windowTime != null) {
 			this.windowTime = windowTime;
-			this.triggerOnTimeout=false;
+			this.timeoutTrigger =false;
 		}
 
 		return this;
 	}
 
-	public Pattern<T, F> withinTimeoutTrigger(Time windowTime) {
+	public Pattern<T, F> withinTimeout(Time windowTime) {
 		if (windowTime != null) {
 			this.windowTime = windowTime;
-			this.triggerOnTimeout=true;
+			this.timeoutTrigger = true;
 		}
 
 		return this;
 	}
-
 
 	/**
 	 * Appends a new pattern operator to the existing one. The new pattern operator enforces strict

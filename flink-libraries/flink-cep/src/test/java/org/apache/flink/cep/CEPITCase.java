@@ -436,7 +436,7 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 				@Nullable
 				@Override
 				public Watermark checkAndGetNextWatermark(Integer lastElement, long extractedTimestamp) {
-					return new Watermark(extractedTimestamp-3000);
+					return new Watermark(extractedTimestamp-1);
 				}
 
 				@Override
@@ -445,7 +445,7 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 				}
 			});
 
-		Pattern<Integer, ?> pattern = Pattern.<Integer>begin("start").next("end").withinTimeoutTrigger(Time.seconds(2));
+		Pattern<Integer, ?> pattern = Pattern.<Integer>begin("start").next("end").withinTimeout(Time.seconds(2));
 
 		DataStream<String> result = CEP.pattern(input, pattern).select(new PatternSelectFunction<Integer, String>() {
 			@Override
@@ -455,7 +455,7 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 			}
 		});
 
-//		result.print();
+		result.print();
 		result.writeAsText(resultPath, FileSystem.WriteMode.OVERWRITE);
 
 		expected = "12\n2to\n45";
