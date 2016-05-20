@@ -49,7 +49,7 @@ public abstract class AbstractFetcher<T, KPH> {
 	private static final int PERIODIC_WATERMARKS = 1;
 	private static final int PUNCTUATED_WATERMARKS = 2;
 
-	private int id = WatermarkSync.INSTANCE.getId();
+	private int id = WatermarkSync.getInstance().getId();
 
 
 	// ------------------------------------------------------------------------
@@ -251,7 +251,7 @@ public abstract class AbstractFetcher<T, KPH> {
 			timestamp = withWatermarksState.getTimestampForRecord(record);
 		}
 
-		long sleep = WatermarkSync.INSTANCE.emitWatermark(id, withWatermarksState.getCurrentWatermark());
+		long sleep = WatermarkSync.getInstance().emitWatermark(id, withWatermarksState.getCurrentWatermark());
 
 
 		// emit the record with timestamp, using the usual checkpoint lock to guarantee
@@ -279,7 +279,7 @@ public abstract class AbstractFetcher<T, KPH> {
 		final long timestamp = withWatermarksState.getTimestampForRecord(record);
 		final Watermark newWatermark = withWatermarksState.checkAndGetNewWatermark(record, timestamp);
 
-		long sleep = WatermarkSync.INSTANCE.emitWatermark(id, new Watermark(withWatermarksState.getCurrentPartitionWatermark()));
+		long sleep = WatermarkSync.getInstance().emitWatermark(id, new Watermark(withWatermarksState.getCurrentPartitionWatermark()));
 		// emit the record with timestamp, using the usual checkpoint lock to guarantee
 		// atomicity of record emission and offset state update 
 		synchronized (checkpointLock) {

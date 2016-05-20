@@ -2,13 +2,23 @@ package org.apache.flink.streaming.connectors.kafka.internals;
 
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.streaming.api.watermark.Watermark;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 
 public class WatermarkSync {
-	public static final WatermarkSync INSTANCE = new WatermarkSync();
+	private static WatermarkSync INSTANCE;
+	Logger LOG = LoggerFactory.getLogger(WatermarkSync.class.getName());
+
+	synchronized public static WatermarkSync getInstance() {
+		if (INSTANCE==null) {
+			INSTANCE=new WatermarkSync();
+		}
+		return INSTANCE;
+	}
 	private int counter =0;
-	private ArrayList<Watermark> watermarks;
+	private ArrayList<Watermark> watermarks = new ArrayList<Watermark>();
 
 	synchronized public int getId() {
 		Integer result =counter++;
@@ -17,7 +27,7 @@ public class WatermarkSync {
 	}
 
 	private Watermark getMinWm() {
-		Watermark maxWm = new Watermark(0);
+		Watermark maxWm = Watermark.MAX_WATERMARK;
 		for (Watermark wm: watermarks){
 			if (maxWm.getTimestamp() > wm.getTimestamp()){
 				maxWm = wm;
@@ -32,6 +42,18 @@ public class WatermarkSync {
 		}
 		Watermark min = getMinWm();
 		Watermark our = watermarks.get(id);
-		return (our.getTimestamp() - min.getTimestamp()) / 100;
+		long res =Math.min((our.getTimestamp() - min.getTimestamp()) / 100, 1000);
+		if (res >0) {
+			LOG.info(new StringBuilder("Suspending ")
+				.append(id)
+				.append(":")
+				.append(res)
+				.append(" at ")
+				.append(our.getTimestamp())
+				.append(" min ")
+				.append(min.getTimestamp())
+				.toString() );
+		}
+		return res;
 	}
 }
