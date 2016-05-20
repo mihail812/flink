@@ -105,4 +105,20 @@ public abstract class AbstractCEPPatternOperator<IN>
 			}
 		}
 	}
+
+	protected void processWatermark(NFA<IN> nfa, long timestamp) {
+		Collection<Map<String, IN>> patterns = nfa.processWatermark(timestamp);
+
+		if (!patterns.isEmpty()) {
+			StreamRecord<Map<String, IN>> streamRecord = new StreamRecord<Map<String, IN>>(
+				null,
+				timestamp);
+
+			for (Map<String, IN> pattern : patterns) {
+				streamRecord.replace(pattern);
+				output.collect(streamRecord);
+			}
+		}
+	}
+
 }

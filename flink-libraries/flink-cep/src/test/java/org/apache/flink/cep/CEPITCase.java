@@ -589,7 +589,7 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 			}
 		});
 
-		result.print();
+//		result.print();
 		result.writeAsText(resultPath, FileSystem.WriteMode.OVERWRITE);
 
 		expected = "12\n24\n45";

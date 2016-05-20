@@ -107,6 +107,45 @@ public class NFA<T> implements Serializable {
 		}
 	}
 
+	public Collection<Map<String, T>> processWatermark(final long timestamp) {
+		final int numberComputationStates = computationStates.size();
+		final List<Map<String, T>> result = new ArrayList<>();
+
+		// iterate over all current computations
+		for (int i = 0; i < numberComputationStates; i++) {
+			ComputationState<T> computationState = computationStates.poll();
+
+			if (!computationState.isStartState() &&
+				windowTime > 0 &&
+				timestamp - computationState.getStartTimestamp() >= windowTime) {
+				// remove computation state which has exceeded the window length
+				sharedBuffer.release(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
+				sharedBuffer.remove(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
+				if (timeoutTrigger) {
+					result.addAll(extractPatternMatches(computationState));
+				}
+			} else {
+				computationStates.add(computationState);
+			}
+
+			// prune shared buffer based on window length
+			if(windowTime > 0) {
+				long pruningTimestamp = timestamp - windowTime;
+
+				// sanity check to guard against underflows
+				if (pruningTimestamp >= timestamp) {
+					throw new IllegalStateException("Detected an underflow in the pruning timestamp. This indicates that" +
+						" either the window length is too long (" + windowTime + ") or that the timestamp has not been" +
+						" set correctly (e.g. Long.MIN_VALUE).");
+				}
+
+				// remove all elements which are expired with respect to the window length
+				sharedBuffer.prune(pruningTimestamp);
+			}
+		}
+
+		return result;
+	}
 	/**
 	 * Processes the next input event. If some of the computations reach a final state then the
 	 * resulting event sequences are returned.
@@ -129,10 +168,12 @@ public class NFA<T> implements Serializable {
 			if (!computationState.isStartState() &&
 				windowTime > 0 &&
 				timestamp - computationState.getStartTimestamp() >= windowTime) {
+				if (timeoutTrigger) {
+					result.addAll(extractPatternMatches(computationState));
+				}
 				// remove computation state which has exceeded the window length
 				sharedBuffer.release(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
 				sharedBuffer.remove(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
-
 				newComputationStates = Collections.emptyList();
 			} else {
 				newComputationStates = computeNextStates(computationState, event, timestamp);
