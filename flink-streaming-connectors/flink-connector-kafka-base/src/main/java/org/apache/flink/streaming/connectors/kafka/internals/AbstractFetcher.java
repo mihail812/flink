@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka.internals;
 
+import org.apache.flink.api.java.typeutils.ObjectArrayTypeInfo;
 import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks;
 import org.apache.flink.streaming.api.functions.AssignerWithPunctuatedWatermarks;
 import org.apache.flink.streaming.api.functions.source.SourceFunction.SourceContext;
@@ -27,9 +28,7 @@ import org.apache.flink.streaming.runtime.operators.Triggerable;
 import org.apache.flink.util.SerializedValue;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -50,14 +49,9 @@ public abstract class AbstractFetcher<T, KPH> {
 	private static final int PERIODIC_WATERMARKS = 1;
 	private static final int PUNCTUATED_WATERMARKS = 2;
 
-	private static long lastMinEmited = 0;
-	private static long lastMaxEmited = Long.MAX_VALUE;
+	private int id = WatermarkSync.INSTANCE.getId();
 
-	synchronized static long setEmited(long candidate) {
-		lastMinEmited = Math.min(lastMinEmited, candidate);
-		lastMaxEmited = Math.max(lastMinEmited, candidate);
-		return (candidate-lastMinEmited)/100;
-	}
+
 	// ------------------------------------------------------------------------
 	
 	/** The source context to emit records and watermarks to */
@@ -256,8 +250,9 @@ public abstract class AbstractFetcher<T, KPH> {
 		synchronized (withWatermarksState) {
 			timestamp = withWatermarksState.getTimestampForRecord(record);
 		}
-		long ourEmited = withWatermarksState.getCurrentWatermarkTimestamp();
-		long sleep = setEmited(ourEmited);
+
+		long sleep = WatermarkSync.INSTANCE.emitWatermark(id, withWatermarksState.getCurrentWatermark());
+
 
 		// emit the record with timestamp, using the usual checkpoint lock to guarantee
 		// atomicity of record emission and offset state update 
@@ -284,9 +279,7 @@ public abstract class AbstractFetcher<T, KPH> {
 		final long timestamp = withWatermarksState.getTimestampForRecord(record);
 		final Watermark newWatermark = withWatermarksState.checkAndGetNewWatermark(record, timestamp);
 
-		long ourEmited = newWatermark.getTimestamp();
-		long sleep = setEmited(ourEmited);
-
+		long sleep = WatermarkSync.INSTANCE.emitWatermark(id, new Watermark(withWatermarksState.getCurrentPartitionWatermark()));
 		// emit the record with timestamp, using the usual checkpoint lock to guarantee
 		// atomicity of record emission and offset state update 
 		synchronized (checkpointLock) {
