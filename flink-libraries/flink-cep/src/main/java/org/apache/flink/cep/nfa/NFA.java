@@ -119,11 +119,11 @@ public class NFA<T> implements Serializable {
 				windowTime > 0 &&
 				timestamp - computationState.getStartTimestamp() >= windowTime) {
 				// remove computation state which has exceeded the window length
-				sharedBuffer.release(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
-				sharedBuffer.remove(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
 				if (timeoutTrigger) {
 					result.addAll(extractPatternMatches(computationState));
 				}
+				sharedBuffer.release(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
+				sharedBuffer.remove(computationState.getState(), computationState.getEvent(), computationState.getTimestamp());
 			} else {
 				computationStates.add(computationState);
 			}

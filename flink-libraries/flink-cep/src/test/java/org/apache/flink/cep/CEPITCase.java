@@ -425,6 +425,53 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 	}
 
 	@Test
+	public void testProcessingTimeWithKeyedWindowTimeout() throws Exception {
+		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+		env.setParallelism(1);
+
+		DataStream<Tuple2<Integer, Integer>> input = env
+			.fromElements(new Tuple2<>(0, 1), new Tuple2<>(1, 1),
+				new Tuple2<>(0, 2),
+			    new Tuple2<>(0, 4),
+				new Tuple2<>(0, 5),
+				new Tuple2<>(0, 8))
+			.assignTimestampsAndWatermarks(new AssignerWithPunctuatedWatermarks<Tuple2<Integer, Integer>>() {
+				@Nullable
+				@Override
+				public Watermark checkAndGetNextWatermark(Tuple2<Integer, Integer> lastElement, long extractedTimestamp) {
+					return new Watermark(extractedTimestamp-1);
+				}
+
+				@Override
+				public long extractTimestamp(Tuple2<Integer, Integer> element, long previousElementTimestamp) {
+					return element.f1.longValue()*1000;
+				}
+			});
+
+		Pattern<Tuple2<Integer, Integer>, ?> pattern = Pattern.<Tuple2<Integer, Integer>>begin("start").next("end").withinTimeout(Time.seconds(2));
+
+		DataStream<String> result = CEP.pattern(input.keyBy(0), pattern).select(new PatternSelectFunction<Tuple2<Integer, Integer>, String>() {
+			@Override
+			public String select(Map<String, Tuple2<Integer, Integer>> pattern) throws Exception {
+				return pattern.get("start").toString() + pattern.get("end");
+			}
+		});
+
+//		result.print();
+		result.writeAsText(resultPath, FileSystem.WriteMode.OVERWRITE);
+
+		expected = "(0,1)(0,2)\n" +
+			"(1,1)null\n" +
+			"(0,2)null\n" +
+			"(0,4)(0,5)\n" +
+			"(0,5)null\n" +
+			"(0,8)null";
+
+		env.execute();
+	}
+
+	@Test
 	public void testProcessingTimeWithWindowTimeout() throws Exception {
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
@@ -462,6 +509,7 @@ public class CEPITCase extends StreamingMultipleProgramsTestBase {
 
 		env.execute();
 	}
+
 
 	@Ignore
 	@Test
